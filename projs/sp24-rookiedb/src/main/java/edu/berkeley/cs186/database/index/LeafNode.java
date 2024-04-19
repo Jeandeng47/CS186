@@ -22,10 +22,10 @@ import javax.xml.crypto.Data;
  * leaf is serialized. For example, here is an illustration of two order 2
  * leafs connected together:
  *
- *   leaf 1 (stored on some page)          leaf 2 (stored on some other page)
- *   +-------+-------+-------+-------+     +-------+-------+-------+-------+
- *   | k0:r0 | k1:r1 | k2:r2 |       | --> | k3:r3 | k4:r4 |       |       |
- *   +-------+-------+-------+-------+     +-------+-------+-------+-------+
+ * leaf 1 (stored on some page) leaf 2 (stored on some other page)
+ * +-------+-------+-------+-------+ +-------+-------+-------+-------+
+ * | k0:r0 | k1:r1 | k2:r2 | | --> | k3:r3 | k4:r4 | | |
+ * +-------+-------+-------+-------+ +-------+-------+-------+-------+
  */
 class LeafNode extends BPlusNode {
     // Metadata about the B+ tree that this node belongs to.
@@ -49,53 +49,55 @@ class LeafNode extends BPlusNode {
     // keys and record ids stored on disk. Thus, consider what happens when you
     // create two LeafNode objects that point to the same page:
     //
-    //   BPlusTreeMetadata meta = ...;
-    //   int pageNum = ...;
-    //   LockContext treeContext = new DummyLockContext();
+    // BPlusTreeMetadata meta = ...;
+    // int pageNum = ...;
+    // LockContext treeContext = new DummyLockContext();
     //
-    //   LeafNode leaf0 = LeafNode.fromBytes(meta, bufferManager, treeContext, pageNum);
-    //   LeafNode leaf1 = LeafNode.fromBytes(meta, bufferManager, treeContext, pageNum);
+    // LeafNode leaf0 = LeafNode.fromBytes(meta, bufferManager, treeContext,
+    // pageNum);
+    // LeafNode leaf1 = LeafNode.fromBytes(meta, bufferManager, treeContext,
+    // pageNum);
     //
     // This scenario looks like this:
     //
-    //   HEAP                        | DISK
-    //   ===============================================================
-    //   leaf0                       | page 42
-    //   +-------------------------+ | +-------+-------+-------+-------+
-    //   | keys = [k0, k1, k2]     | | | k0:r0 | k1:r1 | k2:r2 |       |
-    //   | rids = [r0, r1, r2]     | | +-------+-------+-------+-------+
-    //   | pageNum = 42            | |
-    //   +-------------------------+ |
-    //                               |
-    //   leaf1                       |
-    //   +-------------------------+ |
-    //   | keys = [k0, k1, k2]     | |
-    //   | rids = [r0, r1, r2]     | |
-    //   | pageNum = 42            | |
-    //   +-------------------------+ |
-    //                               |
+    // HEAP | DISK
+    // ===============================================================
+    // leaf0 | page 42
+    // +-------------------------+ | +-------+-------+-------+-------+
+    // | keys = [k0, k1, k2] | | | k0:r0 | k1:r1 | k2:r2 | |
+    // | rids = [r0, r1, r2] | | +-------+-------+-------+-------+
+    // | pageNum = 42 | |
+    // +-------------------------+ |
+    // |
+    // leaf1 |
+    // +-------------------------+ |
+    // | keys = [k0, k1, k2] | |
+    // | rids = [r0, r1, r2] | |
+    // | pageNum = 42 | |
+    // +-------------------------+ |
+    // |
     //
     // Now imagine we perform on operation on leaf0 like leaf0.put(k3, r3). The
     // in-memory values of leaf0 will be updated and they will be synced to disk.
     // But, the in-memory values of leaf1 will not be updated. That will look
     // like this:
     //
-    //   HEAP                        | DISK
-    //   ===============================================================
-    //   leaf0                       | page 42
-    //   +-------------------------+ | +-------+-------+-------+-------+
-    //   | keys = [k0, k1, k2, k3] | | | k0:r0 | k1:r1 | k2:r2 | k3:r3 |
-    //   | rids = [r0, r1, r2, r3] | | +-------+-------+-------+-------+
-    //   | pageNum = 42            | |
-    //   +-------------------------+ |
-    //                               |
-    //   leaf1                       |
-    //   +-------------------------+ |
-    //   | keys = [k0, k1, k2]     | |
-    //   | rids = [r0, r1, r2]     | |
-    //   | pageNum = 42            | |
-    //   +-------------------------+ |
-    //                               |
+    // HEAP | DISK
+    // ===============================================================
+    // leaf0 | page 42
+    // +-------------------------+ | +-------+-------+-------+-------+
+    // | keys = [k0, k1, k2, k3] | | | k0:r0 | k1:r1 | k2:r2 | k3:r3 |
+    // | rids = [r0, r1, r2, r3] | | +-------+-------+-------+-------+
+    // | pageNum = 42 | |
+    // +-------------------------+ |
+    // |
+    // leaf1 |
+    // +-------------------------+ |
+    // | keys = [k0, k1, k2] | |
+    // | rids = [r0, r1, r2] | |
+    // | pageNum = 42 | |
+    // +-------------------------+ |
+    // |
     //
     // Make sure your code (or your tests) doesn't use stale in-memory cached
     // values of keys and rids.
@@ -114,18 +116,18 @@ class LeafNode extends BPlusNode {
      * to that page.
      */
     LeafNode(BPlusTreeMetadata metadata, BufferManager bufferManager, List<DataBox> keys,
-             List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext) {
+            List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext) {
         this(metadata, bufferManager, bufferManager.fetchNewPage(treeContext, metadata.getPartNum()),
-             keys, rids,
-             rightSibling, treeContext);
+                keys, rids,
+                rightSibling, treeContext);
     }
 
     /**
      * Construct a leaf node that is persisted to page `page`.
      */
     private LeafNode(BPlusTreeMetadata metadata, BufferManager bufferManager, Page page,
-                     List<DataBox> keys,
-                     List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext) {
+            List<DataBox> keys,
+            List<RecordId> rids, Optional<Long> rightSibling, LockContext treeContext) {
         try {
             assert (keys.size() == rids.size());
             assert (keys.size() <= 2 * metadata.getOrder());
@@ -149,24 +151,79 @@ class LeafNode extends BPlusNode {
     @Override
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
-
-        return null;
+        // base case
+        return this;
     }
 
     // See BPlusNode.getLeftmostLeaf.
     @Override
     public LeafNode getLeftmostLeaf() {
         // TODO(proj2): implement
-
-        return null;
+        // base case
+        return this;
     }
 
     // See BPlusNode.put.
     @Override
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(proj2): implement
+        // 0. Check if the key is allowed
+        if (keys.contains(key)) {
+            throw new BPlusTreeException("Duplicate keys are not allowed.");
+        }
+        // 1. Insert the key and recordid into the list
+        int pos = InnerNode.numLessThan(key, keys); // Note: numLessThan not numLessThanEqual
+        keys.add(pos, key);
+        rids.add(pos, rid);
 
+        // 2. Check overflow
+        int d = metadata.getOrder();
+        if (keys.size() > 2 * d) {
+            // 3. If overflow, split the node
+            return splitLeafNode(); // 4. Return the split key and the new right node's page number
+        }
+
+        sync(); // sync changes
         return Optional.empty();
+    }
+
+    // Helper function the help split the leaf node
+    private Optional<Pair<DataBox, Long>> splitLeafNode() {
+        // 1. Find split point
+        int d = metadata.getOrder();
+        int spiltPoint = d;
+
+        // 2. Get right half of keys and rids
+        // left half index: [0, d), right half index: [d, size]
+        List<DataBox> rightKeys = new ArrayList<>(keys.subList(spiltPoint, keys.size()));
+        List<RecordId> rightIds = new ArrayList<>(rids.subList(spiltPoint, rids.size()));
+
+        // 3. Create the right leaf node
+        LeafNode rightLeafNode = new LeafNode(metadata, bufferManager,
+                rightKeys, rightIds, rightSibling, treeContext); // Note: when a new node is created, a new page is
+                                                                 // fetched in the system to store data
+        long rightNodePageNum = rightLeafNode.getPage().getPageNum();
+        // Ex: to retrieve all records with keys between 5 and 30.
+        // Leaf 1: Contains keys [1, 10, 20] on page 42;
+        // Leaf 2: Contains keys [25, 35, 45] on page 43.
+        // The right sibling pointer in Leaf 1 would contain the page number 43
+        // reaches the key 20 and needs to continue, it uses the pointer to directly
+        // load Leaf 2 from page 43 and continues processing without needing to go back
+        // to a higher tree level.
+
+        // 4. Adjust left leaf node's key and rids
+        keys = new ArrayList<>(keys.subList(0, spiltPoint));
+        rids = new ArrayList<>(rids.subList(0, spiltPoint));
+        this.rightSibling = Optional.of(rightNodePageNum);
+
+        // 5. syn changes
+        sync();
+        rightLeafNode.sync();
+
+        // 6. Return the split key and the right node page
+        DataBox splitKey = rightKeys.get(0);
+
+        return Optional.of(new Pair<>(splitKey, rightNodePageNum));
     }
 
     // See BPlusNode.bulkLoad.
@@ -183,7 +240,15 @@ class LeafNode extends BPlusNode {
     public void remove(DataBox key) {
         // TODO(proj2): implement
 
-        return;
+        // 1. Find the key in the key list
+        int keyIndex = keys.indexOf(key);
+
+        // 2. Check if the key exists
+        if (keyIndex != -1) {
+            keys.remove(keyIndex);
+            rids.remove(keyIndex);
+            sync();
+        }
     }
 
     // Iterators ///////////////////////////////////////////////////////////////
@@ -260,24 +325,24 @@ class LeafNode extends BPlusNode {
     static int maxOrder(short pageSize, Type keySchema) {
         // A leaf node with n entries takes up the following number of bytes:
         //
-        //   1 + 8 + 4 + n * (keySize + ridSize)
+        // 1 + 8 + 4 + n * (keySize + ridSize)
         //
         // where
         //
-        //   - 1 is the number of bytes used to store isLeaf,
-        //   - 8 is the number of bytes used to store a sibling pointer,
-        //   - 4 is the number of bytes used to store n,
-        //   - keySize is the number of bytes used to store a DataBox of type
-        //     keySchema, and
-        //   - ridSize is the number of bytes of a RecordId.
+        // - 1 is the number of bytes used to store isLeaf,
+        // - 8 is the number of bytes used to store a sibling pointer,
+        // - 4 is the number of bytes used to store n,
+        // - keySize is the number of bytes used to store a DataBox of type
+        // keySchema, and
+        // - ridSize is the number of bytes of a RecordId.
         //
         // Solving the following equation
         //
-        //   n * (keySize + ridSize) + 13 <= pageSizeInBytes
+        // n * (keySize + ridSize) + 13 <= pageSizeInBytes
         //
         // we get
         //
-        //   n = (pageSizeInBytes - 13) / (keySize + ridSize)
+        // n = (pageSizeInBytes - 13) / (keySize + ridSize)
         //
         // The order d is half of n.
         int keySize = keySchema.getSizeInBytes();
@@ -309,7 +374,7 @@ class LeafNode extends BPlusNode {
      * Given a leaf with page number 1 and three (key, rid) pairs (0, (0, 0)),
      * (1, (1, 1)), and (2, (2, 2)), the corresponding dot fragment is:
      *
-     *   node1[label = "{0: (0 0)|1: (1 1)|2: (2 2)}"];
+     * node1[label = "{0: (0 0)|1: (1 1)|2: (2 2)}"];
      */
     @Override
     public String toDot() {
@@ -327,21 +392,23 @@ class LeafNode extends BPlusNode {
     public byte[] toBytes() {
         // When we serialize a leaf node, we write:
         //
-        //   a. the literal value 1 (1 byte) which indicates that this node is a
-        //      leaf node,
-        //   b. the page id (8 bytes) of our right sibling (or -1 if we don't have
-        //      a right sibling),
-        //   c. the number (4 bytes) of (key, rid) pairs this leaf node contains,
-        //      and
-        //   d. the (key, rid) pairs themselves.
+        // a. the literal value 1 (1 byte) which indicates that this node is a
+        // leaf node,
+        // b. the page id (8 bytes) of our right sibling (or -1 if we don't have
+        // a right sibling),
+        // c. the number (4 bytes) of (key, rid) pairs this leaf node contains,
+        // and
+        // d. the (key, rid) pairs themselves.
         //
         // For example, the following bytes:
         //
-        //   +----+-------------------------+-------------+----+-------------------------------+
-        //   | 01 | 00 00 00 00 00 00 00 04 | 00 00 00 01 | 03 | 00 00 00 00 00 00 00 03 00 01 |
-        //   +----+-------------------------+-------------+----+-------------------------------+
-        //    \__/ \_______________________/ \___________/ \__________________________________/
-        //     a               b                   c                         d
+        // +----+-------------------------+-------------+----+-------------------------------+
+        // | 01 | 00 00 00 00 00 00 00 04 | 00 00 00 01 | 03 | 00 00 00 00 00 00 00 03
+        // 00 01 |
+        // +----+-------------------------+-------------+----+-------------------------------+
+        // \__/ \_______________________/ \___________/
+        // \__________________________________/
+        // a b c d
         //
         // represent a leaf node with sibling on page 4 and a single (key, rid)
         // pair with key 3 and page id (3, 1).
@@ -373,7 +440,7 @@ class LeafNode extends BPlusNode {
      * Loads a leaf node from page `pageNum`.
      */
     public static LeafNode fromBytes(BPlusTreeMetadata metadata, BufferManager bufferManager,
-                                     LockContext treeContext, long pageNum) {
+            LockContext treeContext, long pageNum) {
         // TODO(proj2): implement
         // Note: LeafNode has two constructors. To implement fromBytes be sure to
         // use the constructor that reuses an existing page instead of fetching a
@@ -425,9 +492,9 @@ class LeafNode extends BPlusNode {
         }
         LeafNode n = (LeafNode) o;
         return page.getPageNum() == n.page.getPageNum() &&
-               keys.equals(n.keys) &&
-               rids.equals(n.rids) &&
-               rightSibling.equals(n.rightSibling);
+                keys.equals(n.keys) &&
+                rids.equals(n.rids) &&
+                rightSibling.equals(n.rightSibling);
     }
 
     @Override
