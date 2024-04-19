@@ -12,6 +12,8 @@ import edu.berkeley.cs186.database.table.RecordId;
 import java.nio.ByteBuffer;
 import java.util.*;
 
+import javax.xml.crypto.Data;
+
 /**
  * A leaf of a B+ tree. Every leaf in a B+ tree of order d stores between d and
  * 2d (key, record id) pairs and a pointer to its right sibling (i.e. the page
@@ -377,7 +379,39 @@ class LeafNode extends BPlusNode {
         // use the constructor that reuses an existing page instead of fetching a
         // brand new one.
 
-        return null;
+        Page page = bufferManager.fetchPage(treeContext, pageNum);
+        Buffer buf = page.getBuffer();
+
+        // Nodetype (1 bytes)
+        byte nodeType = buf.get();
+        assert (nodeType == (byte) 1);
+
+        // Id of right sibling (8 bytes)
+        long rightSiblingId = buf.getLong();
+        // Numbers of pairs (4 bytes)
+        int n = buf.getInt();
+
+        // Pairs of <key, rids>
+        List<DataBox> keys = new ArrayList<>();
+        List<RecordId> rids = new ArrayList<>();
+
+        for (int i = 0; i < n; i++) {
+            keys.add(DataBox.fromBytes(buf, metadata.getKeySchema()));
+            rids.add(RecordId.fromBytes(buf));
+        }
+
+        // special case: if the leaf node is the right most leaf
+        Optional<Long> rightSibling;
+        if (rightSiblingId == -1L) {
+            rightSibling = Optional.empty();
+        } else {
+            rightSibling = Optional.of(rightSiblingId);
+        }
+
+        // use the constructor constructing from existed page
+        LeafNode newLeafNode = new LeafNode(metadata, bufferManager, page, keys, rids, rightSibling, treeContext);
+
+        return newLeafNode;
     }
 
     // Builtins ////////////////////////////////////////////////////////////////
