@@ -138,7 +138,6 @@ public class SortOperator extends QueryOperator {
             Integer i = pair.getSecond();
             sortedRun.add(r);
         }
-
         return sortedRun;
     }
 
