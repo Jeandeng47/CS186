@@ -4,12 +4,12 @@ package edu.berkeley.cs186.database.concurrency;
  * Utility methods to track the relationships between different lock types.
  */
 public enum LockType {
-    S,   // shared
-    X,   // exclusive
-    IS,  // intention shared
-    IX,  // intention exclusive
+    S, // shared
+    X, // exclusive
+    IS, // intention shared
+    IX, // intention exclusive
     SIX, // shared intention exclusive
-    NL;  // no lock held
+    NL; // no lock held
 
     /**
      * This method checks whether lock types A and B are compatible with
@@ -22,8 +22,22 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
-
-        return false;
+        switch (a) {
+            case NL:
+                return true;
+            case IS:
+                return !(b == X);
+            case IX:
+                return b == NL || b == IS || b == IX;
+            case S:
+                return b == NL || b == IS || b == S;
+            case SIX:
+                return b == NL || b == IS;
+            case X:
+                return b == NL;
+            default:
+                throw new UnsupportedOperationException("bad lock type");
+        }
     }
 
     /**
@@ -35,18 +49,26 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         switch (a) {
-        case S: return IS;
-        case X: return IX;
-        case IS: return IS;
-        case IX: return IX;
-        case SIX: return IX;
-        case NL: return NL;
-        default: throw new UnsupportedOperationException("bad lock type");
+            case S:
+                return IS;
+            case X:
+                return IX;
+            case IS:
+                return IS;
+            case IX:
+                return IX;
+            case SIX:
+                return IX;
+            case NL:
+                return NL;
+            default:
+                throw new UnsupportedOperationException("bad lock type");
         }
     }
 
     /**
-     * This method returns if parentLockType has permissions to grant a childLockType
+     * This method returns if parentLockType has permissions to grant a
+     * childLockType
      * on a child.
      */
     public static boolean canBeParentLock(LockType parentLockType, LockType childLockType) {
@@ -54,8 +76,29 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
-
-        return false;
+        // Ex: to get an S lock on a table, we must have (at the very least) an IS lock
+        // on the
+        // parent of table, so canBeParentLock(IS, S) is true
+        // canBeParentLock(A , B) returns true if having A on a resource lets a
+        // transaction acquire a lock of
+        // type B on a child
+        switch (parentLockType) {
+            case NL:
+                return childLockType == NL;
+            case IS:
+                return childLockType == NL || childLockType == IS || childLockType == S;
+            case IX:
+                return childLockType == NL || childLockType == IS || childLockType == S || childLockType == X
+                        || childLockType == IX || childLockType == SIX;
+            case S:
+                return childLockType == NL;
+            case SIX:
+                return childLockType == NL || childLockType == X || childLockType == IX || childLockType == SIX;
+            case X:
+                return childLockType == NL;
+            default:
+                throw new UnsupportedOperationException("bad lock type");
+        }
     }
 
     /**
@@ -69,8 +112,26 @@ public enum LockType {
             throw new NullPointerException("null lock type");
         }
         // TODO(proj4_part1): implement
+        // Ex: if a transaction requested an X lock, and we quietly gave it an S lock,
+        // there will be problems, so substitutable(S, X) = false
 
+        if (substitute == required || required == NL) {
+            return true;
+        }
+
+        // the substitute should have more capabilities than required
+        switch (required) {
+            case IS:
+                return substitute == SIX || substitute == S || substitute == IX || substitute == X;
+            case IX:
+                return substitute == SIX || substitute == X;
+            case S:
+                return substitute == SIX || substitute == X;
+            case SIX:
+                return substitute == X;
+        }
         return false;
+
     }
 
     /**
@@ -83,14 +144,20 @@ public enum LockType {
     @Override
     public String toString() {
         switch (this) {
-        case S: return "S";
-        case X: return "X";
-        case IS: return "IS";
-        case IX: return "IX";
-        case SIX: return "SIX";
-        case NL: return "NL";
-        default: throw new UnsupportedOperationException("bad lock type");
+            case S:
+                return "S";
+            case X:
+                return "X";
+            case IS:
+                return "IS";
+            case IX:
+                return "IX";
+            case SIX:
+                return "SIX";
+            case NL:
+                return "NL";
+            default:
+                throw new UnsupportedOperationException("bad lock type");
         }
     }
 }
-
