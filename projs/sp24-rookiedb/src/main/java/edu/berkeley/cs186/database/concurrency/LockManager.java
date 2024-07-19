@@ -83,21 +83,24 @@ public class LockManager {
          */
         public void grantOrUpdateLock(Lock lock) {
             // TODO(proj4_part1): implement
-            
+
             // 1. Check if a lock already exists
-            for (Lock existinglock : locks) {
-                if (existinglock.transactionNum.equals(lock.transactionNum)) {
+            boolean lockUpdated = false;
+            for (Lock existingLock : locks) {
+                if (existingLock.transactionNum.equals(lock.transactionNum)) {
                     // 2. Update the lock if it already exists
-                    existinglock.lockType = lock.lockType;
+                    existingLock.lockType = lock.lockType;
+                    lockUpdated = true;
+                    break;
                 }
             }
 
             // 3. Add the lock if it does not exist
-            locks.add(lock);
-
-            // 4. update the transaction lock map
-            transactionLocks.computeIfAbsent(lock.transactionNum, k -> new ArrayList<>()).add(lock);
-            return;
+            if (!lockUpdated) {
+                locks.add(lock);
+                // 4. Update the transaction lock map
+                transactionLocks.computeIfAbsent(lock.transactionNum, k -> new ArrayList<>()).add(lock);
+            }
         }
 
         /**
@@ -163,7 +166,8 @@ public class LockManager {
                 boolean compatible = checkCompatible(reqLock.lockType, reqTxnNum);
                 if (compatible) {
                     grantOrUpdateLock(reqLock);
-                    // // Check if request lock is substitutable with required lock types
+
+                    // Check if request lock is substitutable with required lock types
                     // LockType requiredType = getTransactionLockType(reqTxnNum);
                     // boolean substitutable = LockType.substitutable(reqLock.lockType,
                     // requiredType);
@@ -251,38 +255,17 @@ public class LockManager {
         // move the synchronized block elsewhere if you wish.
         boolean shouldBlock = false;
         synchronized (this) {
+            ResourceEntry resourceEntry = getResourceEntry(name);
+            Long txnNum = transaction.getTransNum();
 
             // 0. Error checking
-
             // check if lock on name is held by txn and isn't being released
-            if (!getLockType(transaction, name).equals(LockType.NL)
-                    && !releaseNames.contains(name)) {
+            if (getLockType(transaction, name).equals(lockType)) {
                 throw new DuplicateLockRequestException("Duplicate lock request");
             }
 
-            // check if txn doesn't hold lock on one of names in releaseNames
-
-            // obtain locks of this certain txn
-            List<Lock> txnLocks = getLocks(transaction);
-
-            // build a map of resource names and corresponding locks of txn
-            HashMap<ResourceName, Lock> txnResourceLocks = new HashMap<>();
-            for (Lock lock : txnLocks) {
-                txnResourceLocks.put(lock.name, lock);
-            }
-
-            for (ResourceName resourceName : releaseNames) {
-                if (!txnResourceLocks.containsKey(resourceName)) {
-                    throw new NoLockHeldException("No lock held on " + resourceName);
-                }
-            }
-
             // 1. Acquire the requested lock
-            Long txnNum = transaction.getTransNum();
             Lock newLock = new Lock(name, lockType, txnNum);
-
-            // check compatibility
-            ResourceEntry resourceEntry = getResourceEntry(name);
             boolean compatible = resourceEntry.checkCompatible(lockType, txnNum);
 
             if (!compatible) {
@@ -292,17 +275,23 @@ public class LockManager {
                 LockRequest request = new LockRequest(transaction, newLock);
                 resourceEntry.addToQueue(request, true);
 
+                // prepare the released locks list 
+                // List<Lock> releasedLocks = new ArrayList<>();
+                // for (ResourceName resourceName: releaseNames) {
+                //     LockType releaseLockType = getLockType(transaction, resourceName);
+                //     releasedLocks.add(new Lock(name, releaseLockType, txnNum));
+                // }
+
                 // Prepare to block the transaction
                 transaction.prepareBlock();
 
             } else {
                 resourceEntry.grantOrUpdateLock(newLock);
 
-                // 2. Release the old lock
+                // 2. Release the old lock (other than lock on name)
                 for (ResourceName resourceName : releaseNames) {
                     if (!resourceName.equals(name)) {
-                        Lock lockToRelease = txnResourceLocks.get(resourceName);
-                        resourceEntry.releaseLock(lockToRelease);
+                       release(transaction, resourceName);
                     }
                 }
 
@@ -349,7 +338,7 @@ public class LockManager {
             ResourceEntry resourceEntry = getResourceEntry(name);
             boolean compatible = resourceEntry.checkCompatible(lockType, txnNum);
 
-            if (!compatible) {
+            if (!compatible || !resourceEntry.waitingQueue.isEmpty()) {
                 // block the txn
                 shouldBlock = true;
                 // add the request to the queue
@@ -429,9 +418,12 @@ public class LockManager {
         boolean shouldBlock = false;
         synchronized (this) {
             // 0. Error checking
+            ResourceEntry resourceEntry = getResourceEntry(name);
+            Long txnNum = transaction.getTransNum();
+
+            LockType lockType = getLockType(transaction, name);
 
             // check if the txn already has a newTypeLock
-            LockType lockType = getLockType(transaction, name);
             if (lockType.equals(newLockType)) {
                 throw new DuplicateLockRequestException("Duplicate lock request.");
             }
@@ -442,13 +434,11 @@ public class LockManager {
             }
 
             // check if new type is suitable for old type
-            if (LockType.substitutable(newLockType, lockType)) {
+            if (!LockType.substitutable(newLockType, lockType)) {
                 throw new InvalidLockException("Invlid lock exception.");
             }
 
             // 1. Promote the new lock
-            ResourceEntry resourceEntry = getResourceEntry(name);
-            Long txnNum = transaction.getTransNum();
             // check compatibility
             boolean compatible = resourceEntry.checkCompatible(newLockType, txnNum);
 
