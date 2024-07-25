@@ -578,12 +578,14 @@ public class QueryPlan {
     public QueryOperator minCostSingleAccess(String table) {
         QueryOperator minOp = new SequentialScanOperator(this.transaction, table);
         // TODO(proj3_part2): implement
+        // set sequential scan cost to min cost
         int minCost = minOp.estimateIOCost();
         int index = -1;
-        List<Integer> indexCols = getEligibleIndexColumns(table);
+        // get index of predicates that have index built on them
+        List<Integer> predicateIndex = getEligibleIndexColumns(table);
 
-        // iterate through cols with index
-        for (int i : indexCols) {
+        // iterate through eligible predicates
+        for (int i : predicateIndex) {
             SelectPredicate sp = this.selectPredicates.get(i);
             QueryOperator indexScan = new IndexScanOperator(transaction, 
             table, sp.column, sp.operator, sp.value);
@@ -649,7 +651,6 @@ public class QueryPlan {
     public Map<Set<String>, QueryOperator> minCostJoins(
             Map<Set<String>, QueryOperator> prevMap,
             Map<Set<String>, QueryOperator> pass1Map) {
-
        
         // TODO(proj3_part2): implement
         // We provide a basic description of the logic you have to implement:
@@ -697,6 +698,7 @@ public class QueryPlan {
                     tempSet.add(jp.rightTable);
                     QueryOperator rightOp = pass1Map.get(tempSet);
                     QueryOperator leftOp = prevMap.get(prevSet);
+                    // base table (right table) on the right
                     joinOp = minCostJoinType(leftOp, rightOp, jp.leftColumn, jp.rightColumn);
                     joinedSet.add(jp.rightTable);
                 } 
@@ -704,7 +706,8 @@ public class QueryPlan {
                     tempSet.add(jp.leftTable);
                     QueryOperator rightOp = prevMap.get(prevSet);
                     QueryOperator leftOp = pass1Map.get(tempSet);
-                    joinOp = minCostJoinType(leftOp, rightOp, jp.leftColumn, jp.rightColumn);
+                    // base table (left table) on the right
+                    joinOp = minCostJoinType(rightOp, leftOp, jp.rightColumn, jp.leftColumn);
                     joinedSet.add(jp.leftTable);
                 } else {
                     continue;

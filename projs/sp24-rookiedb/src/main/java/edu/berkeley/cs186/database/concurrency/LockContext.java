@@ -110,8 +110,13 @@ public class LockContext {
             throw new UnsupportedOperationException("Read-only context.");
         }
 
+        // Check if the lockType is NL, should use release
+        if (lockType.equals(LockType.NL)) {
+            throw new InvalidLockException("Should use release.");
+        }
+
         // Check if the request is invalid
-        if (!isValidLockRequest(transaction, lockType)) {
+        if (parent != null && !LockType.canBeParentLock(parent.getEffectiveLockType(transaction), lockType)) {
             throw new InvalidLockException("Invalid lock request.");
         }
 
@@ -119,30 +124,7 @@ public class LockContext {
         updateNumChildLocks(transaction, lockType);
     }
 
-    // validate the lock request based on lock hierarchy and existing locks
-    private boolean isValidLockRequest(TransactionContext transaction, LockType lockType) {
-        
-        // 1. Check the lock request against parent contexts
-        LockContext parentContext = this.parentContext();
-        while (parentContext != null) {
-            LockType parentLockType = parentContext.getExplicitLockType(transaction);
-            if (!LockType.canBeParentLock(parentLockType, lockType)) {
-                return false;
-            }
-            parentContext = parentContext.parentContext();
-        }
-
-        // 2. Check the lock request against existing locks held by the transaction on
-        // the
-        // resource
-        LockType currentLockType = getExplicitLockType(transaction);
-        // if the requested lock type can substitute the current lock type (the
-        // new lock type should be more restrictive than the current one)
-        if (!LockType.substitutable(lockType, currentLockType)) {
-            return false;
-        }
-        return true;
-    }
+    
 
     // update the number of child locks in parent context
     public void updateNumChildLocks(TransactionContext transaction, LockType newLockType) {
@@ -240,33 +222,35 @@ public class LockContext {
             throw new DuplicateLockRequestException("Duplicate lock request.");
         }
 
-        // check if the txn has no lock
-        LockType currentLockType = getExplicitLockType(transaction);
-        if(currentLockType.equals(LockType.NL)) {
-            throw new NoLockHeldException("No lock held on " + name);
+        if (parent != null && !LockType.canBeParentLock(parent.getEffectiveLockType(transaction), newLockType)) {
+            throw new InvalidLockException("The lock request is invalid");
         }
 
-        // check if the promotion is valid
-        if((!currentLockType.equals(newLockType) && LockType.substitutable(newLockType, currentLockType))) {
-            throw new InvalidLockException("New lockType could not substitute the old LockType.");
-        }
+        // check if the txn has no lock
+        LockType currentLockType = getExplicitLockType(transaction);
 
         // special case of promotion to SIX (from IS/IX/S)
         if (newLockType == LockType.SIX) {
             if (hasSIXAncestor(transaction)) {
                 throw new InvalidLockException("Ancestor has SIX lock. Redudant lock request.");
             }
+            if (!LockType.substitutable(newLockType, lockman.getLockType(transaction, name))) {
+                throw new InvalidLockException("New lockType could not substitute the old LockType.");
+            }
+            if (lockman.getLocks(transaction).size() == 0) {
+                throw new NoLockHeldException("No lock held on this transaction.");
+            }
+            
             if (currentLockType.equals(LockType.IS) || currentLockType.equals(LockType.IX) 
             || currentLockType.equals(LockType.S)) {
                 List<ResourceName> sisDescendants = sisDescendants(transaction);
-                for (ResourceName name : sisDescendants) {
-                    lockman.release(transaction, name);
-                }
+                sisDescendants.add(name);
+                lockman.acquireAndRelease(transaction, name, newLockType, sisDescendants);
             }
             
+        } else {
+            lockman.promote(transaction, getResourceName(), newLockType);
         }
-
-        return;
     }
 
     /**
@@ -304,14 +288,12 @@ public class LockContext {
      */
     public void escalate(TransactionContext transaction) throws NoLockHeldException {
         // TODO(proj4_part2): implement
-        // 0. Error checking
-
-        // check if the resource is read only
+      
+        // Error checking
         if (readonly) {
             throw new UnsupportedOperationException("Read-only context.");
         }
 
-        // check if the txn has no lock
         LockType currentLockType = getExplicitLockType(transaction);
         if (currentLockType.equals(LockType.NL)) {
             throw new NoLockHeldException("No lock held on " + name);
@@ -320,47 +302,44 @@ public class LockContext {
         // Determine the most restrictive lock needed (S or X)
         List<Lock> locks = lockman.getLocks(transaction);
         LockType newLockType = LockType.S;
-        for (Lock lock: locks) {
+        for (Lock lock : locks) {
             if (lock.name.isDescendantOf(name) || lock.name.equals(name)) {
-                if (lock.lockType.equals(LockType.IX) || lock.lockType.equals(LockType.X)
-                || lock.lockType.equals(LockType.SIX)) {
+                if (lock.lockType == LockType.IX || lock.lockType == LockType.X || lock.lockType == LockType.SIX) {
                     newLockType = LockType.X;
                     break;
                 }
             }
         }
-        if (currentLockType == newLockType) {return;}
 
-        // get the descendants of the current level
-        List<ResourceName> descendants = getDescendants(transaction);
-        // Release all descendant locks
-        for (ResourceName descendant : descendants) {
-            lockman.release(transaction, descendant);
-            // Update numChildLocks for the descendant context
-            LockContext descendantContext = fromResourceName(lockman, descendant);
-            // update number of children 
-            descendantContext.updateNumChildLocks(transaction, LockType.NL);
+        if (currentLockType == newLockType) {
+            return;
         }
 
-        // acquire the new lock at the current level
-        lockman.acquireAndRelease(transaction, name, newLockType, descendants);
-        // update number of 
-        updateNumChildLocks(transaction, newLockType);
-        return;
-    }
-
-    // Return the list of resource names of the descendants of the current context
-    // for the given trasaction
-    private List<ResourceName> getDescendants(TransactionContext transaction) {
+        // Collect all descendant resource names to be released
         List<ResourceName> descendants = new ArrayList<>();
-        List<Lock> locks = lockman.getLocks(transaction);
         for (Lock lock : locks) {
             if (lock.name.isDescendantOf(name)) {
-                descendants.add(name);
+                descendants.add(lock.name);
             }
         }
-        return descendants;
+
+        // Add the current level lock to the list of locks to be released
+        descendants.add(name);
+
+        // Acquire the new lock at the current context level and release all descendant locks
+        lockman.acquireAndRelease(transaction, name, newLockType, descendants);
+
+        // Update numChildLocks for all affected contexts
+        for (ResourceName descendant : descendants) {
+            LockContext descendantContext = fromResourceName(lockman, descendant);
+            descendantContext.setNumChildren(transaction, 0);
+        }
+
+        // Set the current context's numChildLocks to 0
+        setNumChildren(transaction, 0);
+        
     }
+
 
     /**
      * Get the type of lock that `transaction` holds at this level, or NL if no

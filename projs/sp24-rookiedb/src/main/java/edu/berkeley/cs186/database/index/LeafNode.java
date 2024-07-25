@@ -12,8 +12,6 @@ import edu.berkeley.cs186.database.table.RecordId;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import javax.xml.crypto.Data;
-
 /**
  * A leaf of a B+ tree. Every leaf in a B+ tree of order d stores between d and
  * 2d (key, record id) pairs and a pointer to its right sibling (i.e. the page
@@ -179,12 +177,12 @@ class LeafNode extends BPlusNode {
         // 2. Check overflow
         int d = metadata.getOrder();
         if (keys.size() > 2 * d) {
-            // 3. If overflow, split the node
-            return splitLeafNode(); // 4. Return the split key and the new right node's page number
+            // 3.1 If overflow, split the node
+            return splitLeafNode(); // 4. Return a pair (split_key, right_node_page_num)
         }
 
-        sync(); // sync changes
-        return Optional.empty();
+        sync();
+        return Optional.empty(); // 3.2 if not overflow, return empty
     }
 
     // Helper function the help split the leaf node
@@ -231,7 +229,43 @@ class LeafNode extends BPlusNode {
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(proj2): implement
+        // leaf node: base case
 
+        // 1. get the number of max entries
+        int d = metadata.getOrder();
+        int maxEntries = (int) Math.ceil(fillFactor * 2 * d);
+
+        // 2. insert the data into the leaf node
+
+        while (data.hasNext()) {
+            Pair<DataBox, RecordId> pair = data.next();
+            // 2.1 case 1: no spilt
+            if (this.getKeys().size() < maxEntries) {
+                this.put(pair.getFirst(), pair.getSecond());
+            } else {
+                // 2.2 case 2: spilt
+
+                // create new leaf
+                LeafNode newLeaf = new LeafNode(metadata, bufferManager,
+                        new ArrayList<>(), new ArrayList<>(), Optional.empty(), treeContext);
+                newLeaf.put(pair.getFirst(), pair.getSecond());
+                // connect new and old leaf
+                Long newPage = newLeaf.getPage().getPageNum();
+                this.rightSibling = Optional.of(newPage);
+                // return the spilt key and the new page
+                DataBox spiltKey = newLeaf.getKeys().get(0);
+
+                // sync changes
+                sync();
+                newLeaf.sync();
+
+                return Optional.of(new Pair<>(spiltKey, newPage));
+
+            }
+
+        }
+
+        sync();
         return Optional.empty();
     }
 
@@ -406,8 +440,8 @@ class LeafNode extends BPlusNode {
         // | 01 | 00 00 00 00 00 00 00 04 | 00 00 00 01 | 03 | 00 00 00 00 00 00 00 03
         // 00 01 |
         // +----+-------------------------+-------------+----+-------------------------------+
-        // \__/ \_______________________/ \___________/
-        // \__________________________________/
+        // \__/ \_______________________/
+        // \___________/\__________________________________/
         // a b c d
         //
         // represent a leaf node with sibling on page 4 and a single (key, rid)

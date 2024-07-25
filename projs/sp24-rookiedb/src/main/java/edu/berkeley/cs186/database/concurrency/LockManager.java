@@ -154,6 +154,7 @@ public class LockManager {
          * granted, the transaction that made the request can be unblocked.
          */
         private void processQueue() {
+            // get the iterator on waiting
             Iterator<LockRequest> requests = waitingQueue.iterator();
             // TODO(proj4_part1): implement
 
@@ -416,12 +417,12 @@ public class LockManager {
         // TODO(proj4_part1): implement
         // You may modify any part of this method.
         boolean shouldBlock = false;
+        
         synchronized (this) {
             // 0. Error checking
             ResourceEntry resourceEntry = getResourceEntry(name);
             Long txnNum = transaction.getTransNum();
-
-            LockType lockType = getLockType(transaction, name);
+            LockType lockType = resourceEntry.getTransactionLockType(txnNum);
 
             // check if the txn already has a newTypeLock
             if (lockType.equals(newLockType)) {
@@ -433,15 +434,14 @@ public class LockManager {
                 throw new NoLockHeldException("No lock held on" + name);
             }
 
-            // check if new type is suitable for old type
-            if (!LockType.substitutable(newLockType, lockType)) {
-                throw new InvalidLockException("Invlid lock exception.");
-            }
+            // // check if new type is suitable for old type
+            // if (!LockType.substitutable(newLockType, lockType) || newLockType.equals(lockType)) {
+            //     throw new InvalidLockException("The new lock type is not substitutable for the old lock.");
+            // }
 
             // 1. Promote the new lock
             // check compatibility
             boolean compatible = resourceEntry.checkCompatible(newLockType, txnNum);
-
             Lock lockToUpdate = new Lock(name, newLockType, txnNum);
             if (!compatible) {
                 shouldBlock = true;

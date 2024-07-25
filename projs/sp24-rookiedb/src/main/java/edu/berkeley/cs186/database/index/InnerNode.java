@@ -117,12 +117,14 @@ class InnerNode extends BPlusNode {
         }
 
         // 4. case 2: insertion causes a split, handle split
-        // returned splitLeafNode: Optional.of(new Pair<>(splitKey, rightNodePageNum))
+        // Note: in LeafNode.put(), it returns the splitLeafNode: Optional.of(new
+        // Pair<>(splitKey, rightNodePageNum))
         DataBox newKey = leafPair.get().getFirst();
         Long newPage = leafPair.get().getSecond();
+
         // Insert the new key into the inner node
         keys.add(childIndex, newKey); // newKey == key here
-        children.add(childIndex, newPage);
+        children.add(childIndex + 1, newPage);
 
         // 5. Check if the node (after update) overflows
         int d = metadata.getOrder();
@@ -144,12 +146,12 @@ class InnerNode extends BPlusNode {
         List<DataBox> rightKeys = new ArrayList<>(keys.subList(splitPoint + 1, keys.size()));
         List<Long> rightChildren = new ArrayList<>(children.subList(splitPoint + 1, children.size()));
 
-        // 3. Identify the split key (move up to act as boundary)
+        // 3. Identify the split key (move up)
         DataBox splitKey = keys.get(splitPoint);
 
         // 4. Clear orginal node's right half
         keys.subList(splitPoint, keys.size()).clear(); // also remove split point (we move it up)
-        children.subList(splitPoint + 1, keys.size()).clear();
+        children.subList(splitPoint + 1, children.size()).clear();
 
         // 5. Create new right node
         InnerNode rightInnerNode = new InnerNode(metadata, bufferManager, rightKeys, rightChildren, treeContext);
@@ -168,8 +170,47 @@ class InnerNode extends BPlusNode {
     public Optional<Pair<DataBox, Long>> bulkLoad(Iterator<Pair<DataBox, RecordId>> data,
             float fillFactor) {
         // TODO(proj2): implement
+        if (!data.hasNext()) {
+            return Optional.empty();
+        }
 
+        // 1. Recursively navigate to the rightmost child
+        BPlusNode rightMostChild = getChild(children.size() - 1);
+
+        // 2. Recursively insert data to rightmost
+        Optional<Pair<DataBox, Long>> leafPair = rightMostChild.bulkLoad(data, fillFactor);
+
+        // 3. Handle possible spilts returned from leaf
+        // case 1: if there is spilt (LeafNode return spilt key and new page)
+        while (leafPair.isPresent()) {
+            DataBox newkey = leafPair.get().getFirst();
+            Long newPage = leafPair.get().getSecond();
+
+            // 4. Insert the new key and new page into current inner node
+            int index = numLessThan(newkey, keys);
+            keys.add(index, newkey);
+            children.add(index + 1, newPage);
+
+            // 5. Check if the current inner node overflows (same as put())
+            int d = metadata.getOrder();
+            if (keys.size() > 2 * d) {
+                return splitInnerNode();
+            }
+
+            // 6. Continue loading if there are more entries
+            if (data.hasNext()) {
+                leafPair = rightMostChild.bulkLoad(data, fillFactor);
+            } else {
+                break;
+            }
+
+            // Return info of the spilt key and the new page
+        }
+
+        // case 2: there is no spilt
+        sync();
         return Optional.empty();
+
     }
 
     // See BPlusNode.remove.

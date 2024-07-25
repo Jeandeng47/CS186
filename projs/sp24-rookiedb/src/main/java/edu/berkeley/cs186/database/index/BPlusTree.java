@@ -9,6 +9,7 @@ import edu.berkeley.cs186.database.databox.DataBox;
 import edu.berkeley.cs186.database.databox.Type;
 import edu.berkeley.cs186.database.io.DiskSpaceManager;
 import edu.berkeley.cs186.database.memory.BufferManager;
+import edu.berkeley.cs186.database.table.Record;
 import edu.berkeley.cs186.database.table.RecordId;
 
 import java.io.FileWriter;
@@ -211,6 +212,11 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): Return a BPlusTreeIterator.
+        if (root != null) {
+            // start scanning from the left most leaf
+            LeafNode leftMostLeaf = root.getLeftmostLeaf();
+            return new BPlusTreeIterator(leftMostLeaf, leftMostLeaf.getKeys().get(0));
+        }
 
         return Collections.emptyIterator();
     }
@@ -244,7 +250,10 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): Return a BPlusTreeIterator.
-
+        if (root != null) {
+            LeafNode startLeaf = root.get(key);
+            return new BPlusTreeIterator(startLeaf, key);
+        }
         return Collections.emptyIterator();
     }
 
@@ -268,8 +277,7 @@ public class BPlusTree {
         // the tree's root if the old root splits.
 
         // 1. Traverse and insert the node
-        LeafNode node = root.get(key); // start from root
-        Optional<Pair<DataBox, Long>> pair = node.put(key, rid);
+        Optional<Pair<DataBox, Long>> pair = root.put(key, rid);
 
         // 2. Hanlde the split
 
@@ -284,7 +292,9 @@ public class BPlusTree {
 
         // Note: splitInnerNode: Optional.of(new Pair<>(splitKey, rightNodePageNum))
         newKeys.add(pair.get().getFirst());
-        newChildren.add(pair.get().getSecond());
+        newChildren.add(root.getPage().getPageNum()); // add the parge number of the left node (old root)
+        newChildren.add(pair.get().getSecond()); // add the page number of the new right node
+
         InnerNode newRoot = new InnerNode(metadata, bufferManager, newKeys, newChildren, lockContext);
         updateRoot(newRoot);
     }
@@ -317,7 +327,37 @@ public class BPlusTree {
         // Use the provided updateRoot() helper method to change
         // the tree's root if the old root splits.
 
-        return;
+        // 1. Check the root of the tree
+        if (root != null) {
+            throw new IllegalStateException("Bulk loading is only allowed on an empty tree.");
+        }
+
+        // 2. Create a leaf node as root
+        root = new LeafNode(metadata, bufferManager,
+                new ArrayList<>(), new ArrayList<>(), Optional.empty(), lockContext);
+
+        // 3. Handle spilt in Inner node
+        while (data.hasNext()) {
+            Optional<Pair<DataBox, Long>> pair = root.bulkLoad(data, fillFactor); // possible new root
+            // Note: in InnerNode.bulkLoad(), if split we return the splitInnerNode
+            // otherwise
+            // Optional.empty()
+            if (!pair.isPresent()) {
+                return;
+            }
+
+            List<DataBox> newKeys = new ArrayList<>();
+            List<Long> newChildren = new ArrayList<>();
+
+            // Note: splitInnerNode: Optional.of(new Pair<>(splitKey, rightNodePageNum))
+            newKeys.add(pair.get().getFirst());
+            newChildren.add(root.getPage().getPageNum()); // add the parge number of the left node (old root)
+            newChildren.add(pair.get().getSecond()); // add the page number of the new right node
+
+            InnerNode newRoot = new InnerNode(metadata, bufferManager, newKeys, newChildren, lockContext);
+            updateRoot(newRoot);
+        }
+
     }
 
     /**
@@ -337,8 +377,7 @@ public class BPlusTree {
         LockUtil.ensureSufficientLockHeld(lockContext, LockType.NL);
 
         // TODO(proj2): implement
-
-        return;
+        root.remove(key);
     }
 
     // Helpers /////////////////////////////////////////////////////////////////
@@ -451,19 +490,63 @@ public class BPlusTree {
     // Iterator ////////////////////////////////////////////////////////////////
     private class BPlusTreeIterator implements Iterator<RecordId> {
         // TODO(proj2): Add whatever fields and constructors you want here.
+        private LeafNode currLeaf;
+        private int currIndex;
+
+        // constructor of iterator
+        public BPlusTreeIterator(LeafNode startLeaf, DataBox startKey) {
+            this.currLeaf = startLeaf;
+            this.currIndex = findStartIndex(startLeaf, startKey);
+        }
+
+        private int findStartIndex(LeafNode leaf, DataBox key) {
+            List<DataBox> keys = leaf.getKeys();
+            for (int i = 0; i < keys.size(); i++) {
+                if (keys.get(i).compareTo(key) >= 0) {
+                    return i;
+                }
+            }
+            return keys.size();
+        }
 
         @Override
         public boolean hasNext() {
             // TODO(proj2): implement
 
-            return false;
+            // special case: empty tree
+            if (currLeaf == null)
+                return false;
+
+            while (currIndex >= currLeaf.getRids().size()) {
+                if (!currLeaf.getRightSibling().isPresent()) {
+                    return false;
+                }
+                currLeaf = currLeaf.getRightSibling().get();
+                currIndex = 0;
+            }
+            return true;
         }
 
         @Override
         public RecordId next() {
             // TODO(proj2): implement
 
-            throw new NoSuchElementException();
+            // special case: empty tree
+            if (!hasNext()) {
+                throw new NoSuchElementException("No more elements in the B+ tree.");
+            }
+
+            // the current leaf is exhausted
+            if (currIndex >= currLeaf.getKeys().size()) {
+                currIndex = 0; // reset
+                currLeaf = currLeaf.getRightSibling().get();
+            }
+
+            // the current leaf is not exhausted
+            RecordId rid = currLeaf.getRids().get(currIndex);
+            currIndex++;
+            return rid;
+
         }
     }
 }

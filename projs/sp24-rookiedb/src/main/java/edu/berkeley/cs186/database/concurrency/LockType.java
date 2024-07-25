@@ -120,17 +120,22 @@ public enum LockType {
         }
 
         // the substitute should have more capabilities than required
-        switch (required) {
+        switch (substitute) {
+            case NL:
+                return required == NL;
             case IS:
-                return substitute == SIX || substitute == S || substitute == IX || substitute == X;
+                return required == NL || required == IS;
             case IX:
-                return substitute == SIX || substitute == X;
+                return required == NL || required == IS || required == IX;
             case S:
-                return substitute == SIX || substitute == X;
+                return required == NL || required == IS || required == S;
             case SIX:
-                return substitute == X;
+                return !(required == X);
+            case X:
+                return true;
+            default:
+                throw new UnsupportedOperationException("bad lock type");
         }
-        return false;
 
     }
 
