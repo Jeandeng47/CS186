@@ -18,8 +18,7 @@ import java.util.*;
 
 /**
  * A persistent B+ tree.
- *
- *   BPlusTree tree = new BPlusTree(bufferManager, metadata, lockContext);
+ * *   BPlusTree tree = new BPlusTree(bufferManager, metadata, lockContext);
  *
  *   // Insert some values into the tree.
  *   tree.put(new IntDataBox(0), new RecordId(0, (short) 0));

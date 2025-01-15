@@ -81,8 +81,10 @@ class InnerNode extends BPlusNode {
     @Override
     public LeafNode get(DataBox key) {
         // TODO(proj2): implement
-
-        return null;
+        // Recursive case: innder node
+        int index = InnerNode.numLessThanEqual(key, keys);
+        BPlusNode child = getChild(index);
+        return child.get(key);
     }
 
     // See BPlusNode.getLeftmostLeaf.
@@ -90,8 +92,10 @@ class InnerNode extends BPlusNode {
     public LeafNode getLeftmostLeaf() {
         assert(children.size() > 0);
         // TODO(proj2): implement
-
-        return null;
+        // Recursive case: innder node
+        int index = 0;
+        BPlusNode child = getChild(index);
+        return child.getLeftmostLeaf();
     }
 
     // See BPlusNode.put.
@@ -99,7 +103,60 @@ class InnerNode extends BPlusNode {
     public Optional<Pair<DataBox, Long>> put(DataBox key, RecordId rid) {
         // TODO(proj2): implement
 
-        return Optional.empty();
+        // Recursively find the child to insert
+        int index = InnerNode.numLessThanEqual(key, this.keys);
+        BPlusNode child = getChild(index);
+
+        // Recursively insert the key (until leafNode is reached)
+        Optional<Pair<DataBox, Long>> pair = child.put(key, rid);
+
+        // case 1: no overflow, LeafNode.put() returns Optional.empty(),
+        // we do nothing to innerNode, returns Optional.empty(),
+        if (!pair.isPresent()) {
+            sync();
+            return Optional.empty(); 
+        } else {
+            // case 2: overflow, LeafNode.put() returns pair (splitkey, rightNodePageNum)
+            // we update innerNode and check if it overflows, if so returns pair 
+            // (splitkey, rightNodePageNum) of innerNode
+
+            // Retrieve splitkey and rightNodePageNum
+            DataBox splitKey = pair.get().getFirst();
+            Long rightNodePageNum = pair.get().getSecond();
+
+            this.keys.add(index, splitKey); // the index for splitkey is the same
+            this.children.add(index + 1, rightNodePageNum);
+
+            // Check if innderNode is full
+            int d = this.metadata.getOrder();
+            if (this.keys.size() > 2 * d) {
+                return splitInnderNode();
+            }
+
+            sync();
+            return Optional.empty();
+        }
+    }
+
+    private Optional<Pair<DataBox, Long>> splitInnderNode() {
+        int d = this.metadata.getOrder();
+        DataBox splitkey = this.keys.get(d);
+
+        // Right half: [d + 1, size)
+        List<DataBox> rightKeys = this.keys.subList(d + 1, this.keys.size());
+        List<Long> rightChildren = this.children.subList(d + 1, this.children.size());
+
+        // Left half
+        this.keys = this.keys.subList(0, d); // move up the key
+        this.children = this.children.subList(0, d + 1); // not move the pointer
+
+        // Create a new right inner node
+        InnerNode rightInnderNode = new InnerNode(metadata, bufferManager, rightKeys, rightChildren, treeContext);
+        Long rightPageNum = rightInnderNode.getPage().getPageNum();
+
+        sync();
+        return Optional.of(new Pair<>(splitkey, rightPageNum));
+
     }
 
     // See BPlusNode.bulkLoad.
@@ -127,6 +184,7 @@ class InnerNode extends BPlusNode {
 
     private BPlusNode getChild(int i) {
         long pageNum = children.get(i);
+        // fetch a BPlusNode from the page pageNum
         return BPlusNode.fromBytes(metadata, bufferManager, treeContext, pageNum);
     }
 
@@ -343,6 +401,8 @@ class InnerNode extends BPlusNode {
                                       BufferManager bufferManager, LockContext treeContext, long pageNum) {
         Page page = bufferManager.fetchPage(treeContext, pageNum);
         Buffer buf = page.getBuffer();
+
+        // InnderNode format: isLeaf (1 byte) | numKeys (4 bytes) | keys | children
 
         byte nodeType = buf.get();
         assert(nodeType == (byte) 0);
